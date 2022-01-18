@@ -56,7 +56,6 @@ const checkStorage = (chatId) => {
 }
 
 bot.hears('Manchester Airport Transfer', (ctx) => {
-
   const chatId = ctx.message.chat.id;
   const chatUsername = ctx.message.chat.username;
   const inputTime = new Date()
@@ -89,51 +88,100 @@ Order time: ${checkStorage(chatId).inputTime}
     storage.push(AirportTransfer)
     ctx.reply("ManNVan - please identify your arrival date")
   }
-
-  // ctx.reply('ManNVan - please enter your arrival date')
-  // ctx.reply('ManNVan - please enter your arrival time')
-  // ctx.reply('ManNVan - please enter your pick-up airport')
-  // ctx.reply('ManNVan - please enter your drop-off destination')
-  // ctx.reply('ManNVan - please enter your name')  
-  // ctx.reply('ManNVan - please enter your contact number (e.g. 07517 360302)')
-  // ctx.reply('ManNVan - please confirm your order')
 })
 
 bot.on('message', (ctx) => {
   const chatId = ctx.message.chat.id;
   for (const obj of storage) {
+    //search the storage
     if (obj.chatId == chatId && obj.service == "AirportTransfer") {
+      //condition: file an order to storage and match the service => related question 
       if (obj.date == "" && obj.time == "" && obj.flightNumber == "" && obj.pick_up == "" && obj.drop_off == "" && obj.name == "" && obj.contactNumber == "") {
         obj.date = ctx.message.text;
-        bot.\
-        6(chatId, "ManNVan - please identify your arrival time");
+        ctx.reply("ManNVan - please identify your arrival time");
         break;
       }
       if (obj.date !== "" && obj.time == "" && obj.flightNumber == "" && obj.pick_up == "" && obj.drop_off == "" && obj.name == "" && obj.contactNumber == "") {
         obj.time = ctx.message.text;
-        bot.sendMessage(chatId, "ManNVan - please identify your flight number");
+        ctx.reply("ManNVan - please identify your flight number");
         break;
+      }
+      if (obj.date !== "" && obj.time !== "" && obj.flightNumber == "" && obj.pick_up == "" && obj.drop_off == "" && obj.name == "" && obj.contactNumber == "") {
+        obj.flightNumber = ctx.message.text;
+        ctx.reply("ManNVan - please confirm your pick-up airport", {
+          "reply_markup": {
+            "keyboard": [["Manchester Airport"]]
+          }
+        });
+        break;
+      }
+      if (obj.date !== "" && obj.time !== "" && obj.flightNumber !== "" && obj.pick_up == "" && obj.drop_off == "" && obj.name == "" && obj.contactNumber == "") {
+        obj.pick_up = ctx.message.text;
+        ctx.reply("ManNVan - please enter your drop-off destination");
+        break;
+      }
+      if (obj.date !== "" && obj.time !== "" && obj.flightNumber !== "" && obj.pick_up !== "" && obj.drop_off == "" && obj.name == "" && obj.contactNumber == "") {
+        obj.drop_off = ctx.message.text;
+        ctx.reply("ManNVan - please enter your name");
+        break;
+      }
+      if (obj.date !== "" && obj.time !== "" && obj.flightNumber !== "" && obj.pick_up !== "" && obj.drop_off !== "" && obj.name == "" && obj.contactNumber == "") {
+        obj.name = ctx.message.text;
+        ctx.reply("ManNVan - please enter your contact number");
+        break;
+      }
+      if (obj.date !== "" && obj.time !== "" && obj.flightNumber !== "" && obj.pick_up !== "" && obj.drop_off !== "" && obj.name !== "" && obj.contactNumber == "") {
+        obj.contactNumber = ctx.message.text;
+        ctx.reply(`
+ManNVan - Order information overview: 
+
+【${obj.service}】
+Username: @${obj.username}
+Date: ${obj.date}
+Time: ${obj.time}
+Flight Number: ${obj.flightNumber}
+Pick-up airport: ${obj.pick_up}
+Drop-off destination: ${obj.drop_off}
+name: ${obj.name}
+Contact Number: ${obj.contactNumber}
+
+Please press confirm to send your order, or press cancel to create your new order
+`, {
+          "reply_markup": {
+            "keyboard": [["Confirm", "Cancel"]]
+          }
+        })
+        break;
+      }
+      if (obj.date !== "" && obj.time !== "" && obj.flightNumber !== "" && obj.pick_up !== "" && obj.drop_off !== "" && obj.name !== "" && obj.contactNumber !== "") {
+        if (ctx.message.text == "Confirm"){
+          ctx.telegram.sendMessage(process.env.DRIVER_CHANNEL_ID, `
+ManNVan - Order information overview: 
+
+【${obj.service}】
+Username: @${obj.username}
+Date: ${obj.date}
+Time: ${obj.time}
+Flight Number: ${obj.flightNumber}
+Pick-up airport: ${obj.pick_up}
+Drop-off destination: ${obj.drop_off}
+name: ${obj.name}
+Contact Number: ${obj.contactNumber}
+
+Please press confirm to send your order, or press cancel to create your new order
+`)
+          ctx.reply("ManNVan - we are matching your order with our professional drivers, this usually takes 10-15 mins");
+        }
+        if (ctx.message.text == "Cancel"){
+          ctx.reply("ManNVan - your order is cancelled");
+        }
+        else{
+          ctx.reply("ManNVan - please press Confirm to send your order, or press Cancel to create your new order");
+        }        
+        break
       }
     }
   }
-
-  if (checkStorage(chatId)) {
-    if (currentOrder.service == "AirportTransfer") {
-     
-    }
-    if (currentOrder.service == "HomeMoving") {
-
-    }
-    if (currentOrder.service == "FurnitureDeliveryNAssembly") {
-
-    }
-    if (currentOrder.service == "GoodsDelivery") {
-
-    }
-  }
-
-
-
 })
 
 bot.hears('Home Moving', (ctx) => {
