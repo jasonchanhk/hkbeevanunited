@@ -14,6 +14,25 @@ bot.command('callvan', (ctx) => {
   })
 })
 
+bot.command('broadcast', (ctx) => {
+  console.log(ctx.message)
+    ctx.telegram.sendMessage(process.env.DRIVER_CHANNEL_ID, "ManNVan - please select your service", {
+      "reply_markup": JSON.stringify({
+        "inline_keyboard": [
+          [
+            { text: '👍', callback_data: 'like' },
+            { text: '👎', callback_data: 'dislike' }
+          ]
+        ]
+      })
+    })
+})
+
+bot.action('like', (ctx) => {
+  console.log(ctx.update.callback_query)
+  ctx.answerCbQuery('You have liked it!')
+})
+
 bot.command('cancel', (ctx) => {
   const chatId = ctx.message.chat.id;
   if (checkStorage(chatId)) {
@@ -154,7 +173,8 @@ Please press confirm to send your order, or press cancel to create your new orde
         break;
       }
       if (obj.date !== "" && obj.time !== "" && obj.flightNumber !== "" && obj.pick_up !== "" && obj.drop_off !== "" && obj.name !== "" && obj.contactNumber !== "") {
-        if (ctx.message.text == "Confirm"){
+        if (ctx.message.text == "Confirm") {
+          //send order to driver channel (action: limited to 1 time)
           ctx.telegram.sendMessage(process.env.DRIVER_CHANNEL_ID, `
 ManNVan - Order information overview: 
 
@@ -168,35 +188,42 @@ Drop-off destination: ${obj.drop_off}
 name: ${obj.name}
 Contact Number: ${obj.contactNumber}
 
-Please press confirm to send your order, or press cancel to create your new order
-`)
+Please press Match to take this order, or Skip to tell us you are not interested
+`, {
+  "reply_markup": JSON.stringify({
+    "inline_keyboard": [
+      [
+        { text: 'Match', callback_data: 'driver' },
+        { text: 'Skip', callback_data: 'dislike' }
+      ]
+    ]
+  })
+})
+          //delete order from storage (or no need?)
+          for (var i = 0; i < storage.length; i++) {
+            if (storage[i].chatId == chatId) {
+              storage.splice(i, 1);
+            }
+          }
+          //tell user we have sent your order to drivers
           ctx.reply("ManNVan - we are matching your order with our professional drivers, this usually takes 10-15 mins");
         }
-        if (ctx.message.text == "Cancel"){
+        if (ctx.message.text == "Cancel") {
+          for (var i = 0; i < storage.length; i++) {
+            if (storage[i].chatId == chatId) {
+              storage.splice(i, 1);
+            }
+          }
           ctx.reply("ManNVan - your order is cancelled");
         }
-        else{
-          ctx.reply("ManNVan - please press Confirm to send your order, or press Cancel to create your new order");
-        }        
         break
       }
     }
+    if (obj.chatId == chatId && obj.service == "HomeMoving") { }
+    if (obj.chatId == chatId && obj.service == "FurnitureDeliveryNAssembly") { }
+    if (obj.chatId == chatId && obj.service == "GoodsDelivery") { }
   }
 })
-
-bot.hears('Home Moving', (ctx) => {
-  ctx.reply('Home Moving')
-})
-
-bot.hears('Furniture Delivery and Assembly', (ctx) => {
-  ctx.reply('Furniture Delivery and Assembly')
-})
-
-bot.hears('Goods Delivery', (ctx) => {
-  ctx.reply('Goods Delivery')
-})
-
-
 
 bot.on('text', (ctx) => {
   // Explicit usage
@@ -315,12 +342,7 @@ process.once('SIGTERM', () => bot.stop('SIGTERM'))
 //     // }))
 // })
 
-// bot.onText(/\/broadcast (.+)/, (msg, match) => {
-//     const chatId = msg.chat.id;
-//     const resp = match[1];
 
-//     bot.sendMessage("-1001760273442", resp)
-// })
 
 // // const program = (chatId, inputdata) => {    
 // //     if (airportOrder.flightNumber == "" && airportOrder.pick_up == ""  && airportOrder.drop_off == "" && airportOrder.name == "" && airportOrder.contactNumber == ""){
