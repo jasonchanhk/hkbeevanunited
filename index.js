@@ -1,36 +1,108 @@
-const { Telegraf } = require('telegraf')
+const { Telegraf, Markup  } = require('telegraf')
 require('dotenv').config();
 
 const bot = new Telegraf(process.env.BOT_TOKEN)
-const storage = []//storage refresh every 10 mins, previous order will not be saved//
+const storage = []
+
+const ApplyRegex = (item, text) => {
+  //library for imput regex
+  const pattern = {
+    date: /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$/,
+    time: /^(0[0-9]|1[0-9]|2[0-3])([012345][0-9])$/,
+    flightNumber: /^[a-zA-Z]{2,3}\d{2,4}$/gm,
+    name: /^[a-zA-Z\s]*$/gm,
+    contactNumber: /(((\+44)? ?(\(0\))? ?)|(0))( ?[0-9]{3,4}){3}/gm
+  };
+  //return true/false to see if it match
+  const targerPattern = pattern[item]
+  const result = targerPattern.test(text)
+  console.log(result)
+  return result
+}
+
+ApplyRegex("time", "3388")
+
+//set expiration as 30mins 
+const DeleteExpiredOrder = () => {
+  for (var i = storage.length - 1; i >= 0; i--) {
+    const orderInputTime = parseInt(storage[i].inputTime.toString().slice(0, -3));
+    const orderExpireTime = orderInputTime + 60 * 30
+    const currentTime = parseInt(new Date().getTime().toString().slice(0, -3))
+    if (orderExpireTime < currentTime) {
+      storage.splice(i, 1);
+      console.log("order has been expired")
+    }
+    else {
+      console.log("order is still alive")
+    }
+  }
+  console.log(storage)
+}
+
+// delete expired order every 10 mins
+setInterval(DeleteExpiredOrder, 1000 * 60 * 10)
+
+bot.start((ctx) => {
+  const username = ctx.message.chat.username
+  ctx.reply(`
+Welcome onboard, @${username}!
+
+Thank you for chosing ManNVan. Our team of professional drivers are dedicated to provide flexible and qaulity service to your demand. Send us a request to tell how we can help you!
+
+/callvan Send order to our team
+/status Check order status
+/cancel Cancel existing order
+  `)
+})
 
 bot.command('callvan', (ctx) => {
   console.log(ctx.message)
   const chatId = ctx.message.chat.id;
-  ctx.telegram.sendMessage(chatId, "ManNVan - please select your service", {
-    "reply_markup": {
-      "keyboard": [["Manchester Airport Transfer"], ["Home Moving"], ["Furniture Delivery and Assembly"], ["Goods Delivery"]]
+  ctx.telegram.sendMessage(chatId, "ManNVan - please select your service", 
+    Markup
+    .keyboard([["Manchester Airport Transfer"], ["Home Moving"], ["Furniture Delivery and Assembly"], ["Goods Delivery"]])
+    .oneTime()
+  )
+})
+
+// bot.command('broadcast', (ctx) => {
+//   console.log(ctx.message)
+//   ctx.telegram.sendMessage(process.env.DRIVER_CHANNEL_ID, "ManNVan - please select your service", {
+//     "reply_markup": JSON.stringify({
+//       "inline_keyboard": [
+//         [
+//           { text: 'match', callback_data: '187241595' },
+//           { text: 'skip', callback_data: 'dislike' }
+//         ]
+//       ]
+//     })
+//   })
+// })
+
+bot.action(/(.*?)/, (ctx) => {
+  const clientId = ctx.update.callback_query.data
+  const checkResult = checkStorage(clientId)
+  //check if storage have this order
+  if (checkResult) {
+    ctx.telegram.sendMessage(clientId, `
+ManNVan - your order has been accepted by @${ctx.update.callback_query.from.username}
+(ID: ${ctx.update.callback_query.from.id})
+`)
+    ctx.answerCbQuery('Matching request sent!')
+    ctx.reply("ManNVan - matching successful, please contact the client with the information below")
+    //delete server storage copy
+    for (var i = 0; i < storage.length; i++) {
+      if (storage[i].chatId == clientId) {
+        storage.splice(i, 1);
+        break
+      }
     }
-  })
-})
-
-bot.command('broadcast', (ctx) => {
-  console.log(ctx.message)
-    ctx.telegram.sendMessage(process.env.DRIVER_CHANNEL_ID, "ManNVan - please select your service", {
-      "reply_markup": JSON.stringify({
-        "inline_keyboard": [
-          [
-            { text: '👍', callback_data: 'like' },
-            { text: '👎', callback_data: 'dislike' }
-          ]
-        ]
-      })
-    })
-})
-
-bot.action('like', (ctx) => {
-  console.log(ctx.update.callback_query)
-  ctx.answerCbQuery('You have liked it!')
+    //store driver info in database
+  }
+  else {
+    ctx.answerCbQuery('Matching request sent!')
+    ctx.reply("ManNVan - matching unsuccessful as this order may have been taken or cancelled")
+  }
 })
 
 bot.command('cancel', (ctx) => {
@@ -77,12 +149,13 @@ const checkStorage = (chatId) => {
 bot.hears('Manchester Airport Transfer', (ctx) => {
   const chatId = ctx.message.chat.id;
   const chatUsername = ctx.message.chat.username;
-  const inputTime = new Date()
+  const inputTime = new Date().getTime()
   const AirportTransfer = {
     chatId: chatId,
     username: chatUsername,
     service: "AirportTransfer",
     inputTime: inputTime,
+    status: "drafting",
     date: "",
     time: "",
     flightNumber: "",
@@ -92,6 +165,7 @@ bot.hears('Manchester Airport Transfer', (ctx) => {
     contactNumber: ""
   }
 
+  console.log(AirportTransfer)
   if (checkStorage(chatId)) {
     ctx.reply(`
 ManNVan - you have already filed an order: 
@@ -105,7 +179,7 @@ Order time: ${checkStorage(chatId).inputTime}
     console.log(checkStorage(chatId))
   } else {
     storage.push(AirportTransfer)
-    ctx.reply("ManNVan - please identify your arrival date")
+    ctx.reply("ManNVan - please identify your arrival date (e.g. 2022-04-22)")
   }
 })
 
@@ -116,22 +190,31 @@ bot.on('message', (ctx) => {
     if (obj.chatId == chatId && obj.service == "AirportTransfer") {
       //condition: file an order to storage and match the service => related question 
       if (obj.date == "" && obj.time == "" && obj.flightNumber == "" && obj.pick_up == "" && obj.drop_off == "" && obj.name == "" && obj.contactNumber == "") {
-        obj.date = ctx.message.text;
-        ctx.reply("ManNVan - please identify your arrival time");
+        if (ApplyRegex("date", ctx.message.text)) {
+          obj.date = ctx.message.text;
+          ctx.reply("ManNVan - please identify your arrival time (e.g. 0930)");
+        } else {
+          ctx.reply("ManNVan - please follow the exact format entering your arrival date");
+        }
         break;
       }
       if (obj.date !== "" && obj.time == "" && obj.flightNumber == "" && obj.pick_up == "" && obj.drop_off == "" && obj.name == "" && obj.contactNumber == "") {
-        obj.time = ctx.message.text;
-        ctx.reply("ManNVan - please identify your flight number");
+        if (ApplyRegex("time", ctx.message.text)) {
+          obj.time = ctx.message.text;
+          ctx.reply("ManNVan - please identify your flight number (e.g. BA175)");
+        } else {
+          ctx.reply("ManNVan - please follow the exact format entering your arrival time");
+        }
         break;
       }
       if (obj.date !== "" && obj.time !== "" && obj.flightNumber == "" && obj.pick_up == "" && obj.drop_off == "" && obj.name == "" && obj.contactNumber == "") {
-        obj.flightNumber = ctx.message.text;
-        ctx.reply("ManNVan - please confirm your pick-up airport", {
-          "reply_markup": {
-            "keyboard": [["Manchester Airport"]]
-          }
-        });
+
+        if (ApplyRegex("flightNumber", ctx.message.text)) {
+          obj.flightNumber = ctx.message.text;
+          ctx.reply("ManNVan - please confirm your pick-up airport", Markup.keyboard(["Manchester Airport"]).resize().oneTime());
+        } else {
+          ctx.reply("ManNVan - please follow the exact format entering your flight number");
+        }
         break;
       }
       if (obj.date !== "" && obj.time !== "" && obj.flightNumber !== "" && obj.pick_up == "" && obj.drop_off == "" && obj.name == "" && obj.contactNumber == "") {
@@ -141,72 +224,85 @@ bot.on('message', (ctx) => {
       }
       if (obj.date !== "" && obj.time !== "" && obj.flightNumber !== "" && obj.pick_up !== "" && obj.drop_off == "" && obj.name == "" && obj.contactNumber == "") {
         obj.drop_off = ctx.message.text;
-        ctx.reply("ManNVan - please enter your name");
+        ctx.reply("ManNVan - please enter your name (e.g. Martin Barnes)");
         break;
       }
       if (obj.date !== "" && obj.time !== "" && obj.flightNumber !== "" && obj.pick_up !== "" && obj.drop_off !== "" && obj.name == "" && obj.contactNumber == "") {
-        obj.name = ctx.message.text;
-        ctx.reply("ManNVan - please enter your contact number");
+        if (ApplyRegex("name", ctx.message.text)) {
+          obj.name = ctx.message.text;
+          ctx.reply("ManNVan - please enter your contact number (e.g. 07882590546)");
+        } else {
+          ctx.reply("ManNVan - your name should not include number or symbol");
+        }
         break;
       }
       if (obj.date !== "" && obj.time !== "" && obj.flightNumber !== "" && obj.pick_up !== "" && obj.drop_off !== "" && obj.name !== "" && obj.contactNumber == "") {
+        if (ApplyRegex("contactNumber", ctx.message.text)) {
         obj.contactNumber = ctx.message.text;
         ctx.reply(`
 ManNVan - Order information overview: 
 
 【${obj.service}】
-Username: @${obj.username}
+
 Date: ${obj.date}
 Time: ${obj.time}
 Flight Number: ${obj.flightNumber}
 Pick-up airport: ${obj.pick_up}
 Drop-off destination: ${obj.drop_off}
-name: ${obj.name}
+
+Name: ${obj.name}
 Contact Number: ${obj.contactNumber}
+Username: @${obj.username}
 
 Please press confirm to send your order, or press cancel to create your new order
-`, {
-          "reply_markup": {
-            "keyboard": [["Confirm", "Cancel"]]
-          }
-        })
+`, Markup.keyboard([["Confirm", "Cancel"]]).resize().oneTime())
+      }else{        
+        ctx.reply("ManNVan - please follow the exact format entering your contact number");
+      }
         break;
       }
       if (obj.date !== "" && obj.time !== "" && obj.flightNumber !== "" && obj.pick_up !== "" && obj.drop_off !== "" && obj.name !== "" && obj.contactNumber !== "") {
         if (ctx.message.text == "Confirm") {
-          //send order to driver channel (action: limited to 1 time)
-          ctx.telegram.sendMessage(process.env.DRIVER_CHANNEL_ID, `
+          if (obj.status == "sent2Driver") {
+            ctx.reply("ManNVan - your order has been sent to our professional drivers, please be patient for any response");
+          }
+          if (obj.status == "drafting") {
+            //send order to driver channel (action: limited to 1 time)
+            ctx.telegram.sendMessage(process.env.DRIVER_CHANNEL_ID, `
 ManNVan - Order information overview: 
 
-【${obj.service}】
-Username: @${obj.username}
+【${obj.service} ${obj.date}】
+
 Date: ${obj.date}
 Time: ${obj.time}
 Flight Number: ${obj.flightNumber}
 Pick-up airport: ${obj.pick_up}
 Drop-off destination: ${obj.drop_off}
-name: ${obj.name}
+
+Name: ${obj.name}
 Contact Number: ${obj.contactNumber}
+Username: @${obj.username}
 
 Please press Match to take this order, or Skip to tell us you are not interested
-`, {
-  "reply_markup": JSON.stringify({
-    "inline_keyboard": [
-      [
-        { text: 'Match', callback_data: 'driver' },
-        { text: 'Skip', callback_data: 'dislike' }
-      ]
-    ]
-  })
-})
-          //delete order from storage (or no need?)
-          for (var i = 0; i < storage.length; i++) {
-            if (storage[i].chatId == chatId) {
-              storage.splice(i, 1);
-            }
+// `, Markup.inlineKeyboard([
+  Markup.button.callback('Match', `${obj.chatId}`),
+  Markup.button.callback('Report', `r${obj.chatId}`)
+])
+// {
+//               "reply_markup": JSON.stringify({
+//                 "inline_keyboard": [
+//                   [
+//                     { text: 'Match', callback_data: `${obj.chatId}` },
+//                     { text: 'Skip', callback_data: 'dislike' }
+//                   ]
+//                 ]
+//               })
+//             }
+)
+            obj.status = "sent2Driver"
+            ctx.reply("ManNVan - we are matching your order with our professional drivers, this usually takes 10-15 mins");
+            //send order record to database
           }
-          //tell user we have sent your order to drivers
-          ctx.reply("ManNVan - we are matching your order with our professional drivers, this usually takes 10-15 mins");
         }
         if (ctx.message.text == "Cancel") {
           for (var i = 0; i < storage.length; i++) {
@@ -225,150 +321,8 @@ Please press Match to take this order, or Skip to tell us you are not interested
   }
 })
 
-bot.on('text', (ctx) => {
-  // Explicit usage
-  ctx.telegram.sendMessage(ctx.message.chat.id, `Hello ${ctx.state.role}`)
-  console.log(ctx)
-  // Using context shortcut
-  ctx.reply(`Hello ${ctx.state.role}`)
-})
-
-bot.on('callback_query', (ctx) => {
-  // Explicit usage
-  ctx.telegram.answerCbQuery(ctx.callbackQuery.id)
-
-  // Using context shortcut
-  ctx.answerCbQuery()
-})
-
-bot.on('inline_query', (ctx) => {
-  const result = []
-  // Explicit usage
-  ctx.telegram.answerInlineQuery(ctx.inlineQuery.id, result)
-
-  // Using context shortcut
-  ctx.answerInlineQuery(result)
-})
-
 bot.launch()
 
 // Enable graceful stop
 process.once('SIGINT', () => bot.stop('SIGINT'))
 process.once('SIGTERM', () => bot.stop('SIGTERM'))
-
-
-// require('dotenv').config()
-// const TelegramBot = require('node-telegram-bot-api');
-
-// // replace the value below with the Telegram token you receive from @BotFather
-// const token = "5074807591:AAEIWNQRdjwJesIt29T6rRD5ijo1K_dw68Q";
-
-// // Create a bot that uses 'polling' to fetch new updates
-// const bot = new TelegramBot(token, { polling: true });
-
-// //tempt storage//
-// const storage = []
-// //
-
-// bot.onText(/Airport pick-up/, (msg) => {
-//     const chatId = msg.chat.id;
-//     const chatUsername = msg.chat.username
-//     let airportOrder = {
-//         chatId: `${chatId}`,
-//         username: `@${chatUsername}`,
-//         date: "",
-//         time: "",
-//         flightNumber: "",
-//         pick_up: "",
-//         drop_off: "",
-//         name: "",
-//         contactNumber: ""
-//     }
-//     bot.sendMessage(chatId, "ManNVan - please enter your flight number")
-
-//     bot.on("message", (msg) => {
-//         const chatId = msg.chat.id;
-//         const inputdata = msg.text
-
-//         if (inputdata == "/cancel"){
-//             airportOrder = {}
-//             bot.sendMessage(chatId, "ManNVan - your order is cancelled")
-//         }
-//         else{
-//             if (airportOrder.flightNumber == "" && airportOrder.pick_up == "" && airportOrder.drop_off == "" && airportOrder.name == "" && airportOrder.contactNumber == "") {
-//                 airportOrder.flightNumber = inputdata
-//                 bot.sendMessage(chatId, "ManNVan - please identify your pick-up airport")
-//                 return
-//             }
-//             if (airportOrder.flightNumber !== "" && airportOrder.pick_up == "" && airportOrder.drop_off == "" && airportOrder.name == "" && airportOrder.contactNumber == "") {
-//                 airportOrder.pick_up = inputdata
-//                 bot.sendMessage(chatId, "ManNVan - please enter your drop-off destination")
-//                 return
-//             }
-//             if (airportOrder.flightNumber !== "" && airportOrder.pick_up !== "" && airportOrder.drop_off == "" && airportOrder.name == "" && airportOrder.contactNumber == "") { //previous answer inputed?       
-//                 airportOrder.drop_off = inputdata  //set current input
-//                 bot.sendMessage(chatId, "ManNVan - please enter your name") //ask for next question
-//                 return
-//             }
-//             if (airportOrder.flightNumber !== "" && airportOrder.pick_up !== "" && airportOrder.drop_off !== "" && airportOrder.name == "" && airportOrder.contactNumber == "") {
-//                 airportOrder.name = inputdata
-//                 bot.sendMessage(chatId, "ManNVan - please enter your contact number")
-//                 return
-//             }
-//             if (airportOrder.flightNumber !== "" && airportOrder.pick_up !== "" && airportOrder.drop_off !== "" && airportOrder.name !== "" && airportOrder.contactNumber == "") {
-//                 airportOrder.contactNumber = inputdata
-//                 bot.sendMessage(chatId, `flightNumber: ${airportOrder.flightNumber}\npick_up: ${airportOrder.pick_up}\ndrop_off: ${airportOrder.drop_off}\nname: ${airportOrder.name}\ncontactNumber: ${airportOrder.contactNumber}`)
-//                 bot.sendMessage("-1001760273442", `flightNumber: ${airportOrder.flightNumber}\npick_up: ${airportOrder.pick_up}\ndrop_off: ${airportOrder.drop_off}\nname: ${airportOrder.name}\ncontactNumber: ${airportOrder.contactNumber}`)
-//                 return
-//             }
-//         }
-//         console.log(airportOrder)
-//     })
-
-//     // bot.onText(/\/cancel/, (msg => {
-//     //     const chatId = msg.chat.id;
-//     //     airportOrder = {
-//     //         chatId: `${chatId}`,
-//     //         username: `@${chatUsername}`,
-//     //         date: "",
-//     //         time: "",
-//     //         flightNumber: "",
-//     //         pick_up: "",
-//     //         drop_off: "",
-//     //         name: "",
-//     //         contactNumber: "",
-//     //     }
-//     //     bot.sendMessage(chatId, "ManNVan - your order is cancelled")
-//     // }))
-// })
-
-
-
-// // const program = (chatId, inputdata) => {    
-// //     if (airportOrder.flightNumber == "" && airportOrder.pick_up == ""  && airportOrder.drop_off == "" && airportOrder.name == "" && airportOrder.contactNumber == ""){
-// //         airportOrder.flightNumber = inputdata
-// //         bot.sendMessage(chatId, "ManNVan - please identify your pick-up airport")
-// //         return
-// //     }
-// //     if (airportOrder.flightNumber !== "" && airportOrder.pick_up == "" && airportOrder.drop_off == "" && airportOrder.name == "" && airportOrder.contactNumber == "") {
-// //         airportOrder.pick_up = inputdata
-// //         bot.sendMessage(chatId, "ManNVan - please enter your drop-off destination")
-// //         return
-// //     }
-// //     if (airportOrder.flightNumber !== "" && airportOrder.pick_up !== "" && airportOrder.drop_off == "" && airportOrder.name == "" && airportOrder.contactNumber == ""){ //previous answer inputed?       
-// //         airportOrder.drop_off = inputdata  //set current input
-// //         bot.sendMessage(chatId, "ManNVan - please enter your name") //ask for next question
-// //         return
-// //     }
-// //     if (airportOrder.flightNumber !== "" && airportOrder.pick_up !== "" && airportOrder.drop_off !== "" && airportOrder.name == "" && airportOrder.contactNumber == ""){
-// //         airportOrder.name = inputdata
-// //         bot.sendMessage(chatId, "ManNVan - please enter your contact number")
-// //         return
-// //     }
-// //     if (airportOrder.flightNumber !== "" && airportOrder.pick_up !== "" && airportOrder.drop_off !== "" && airportOrder.name !== "" && airportOrder.contactNumber == ""){airportOrder.contactNumber = inputdata
-// //         airportOrder.contactNumber = inputdata
-// //         bot.sendMessage(chatId, `flightNumber: ${airportOrder.flightNumber}\npick_up: ${airportOrder.pick_up}\ndrop_off: ${airportOrder.drop_off}\nname: ${airportOrder.name}\ncontactNumber: ${airportOrder.contactNumber}`)
-// //         bot.sendMessage("-1001760273442", `flightNumber: ${airportOrder.flightNumber}\npick_up: ${airportOrder.pick_up}\ndrop_off: ${airportOrder.drop_off}\nname: ${airportOrder.name}\ncontactNumber: ${airportOrder.contactNumber}`)
-// //         return
-// //     }
-// // }
