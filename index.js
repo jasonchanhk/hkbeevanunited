@@ -1,8 +1,34 @@
-const { Telegraf, Markup  } = require('telegraf')
+const { Telegraf, Markup } = require('telegraf');
+const RedisSession = require('telegraf-session-redis');
+const axios = require('axios');
 require('dotenv').config();
 
 const bot = new Telegraf(process.env.BOT_TOKEN)
-const storage = []
+// const session = new RedisSession({
+//   store: {
+//     host: process.env.TELEGRAM_SESSION_HOST || '127.0.0.1',
+//     port: process.env.TELEGRAM_SESSION_PORT || 6379
+//   },
+//   ttl: 10
+// })
+
+// bot.use(session)
+
+
+
+bot.hears('message', (ctx) => {
+  ctx.session = {
+    id: ctx.message.chat.id,
+    username: ctx.message.chat.username,
+    text: ctx.message.text
+  }
+  console.log('Session', ctx.session)
+})
+
+bot.command('checksession', (ctx) => {
+  console.log('Session', ctx.session)
+})
+const storage = [] //temp storage
 
 const ApplyRegex = (item, text) => {
   //library for imput regex
@@ -159,8 +185,12 @@ bot.hears('Manchester Airport Transfer', (ctx) => {
     date: "",
     time: "",
     flightNumber: "",
+    pick_up_address: "",
     pick_up: "",
+    drop_off_address: "",
     drop_off: "",
+    distance: 0,
+    charge: 0,
     name: "",
     contactNumber: ""
   }
@@ -218,12 +248,21 @@ bot.on('message', (ctx) => {
         break;
       }
       if (obj.date !== "" && obj.time !== "" && obj.flightNumber !== "" && obj.pick_up == "" && obj.drop_off == "" && obj.name == "" && obj.contactNumber == "") {
-        obj.pick_up = ctx.message.text;
+        obj.pick_up = `${ctx.message.location.latitude},${ctx.message.location.longitude}`;
         ctx.reply("ManNVan - please enter your drop-off destination");
         break;
       }
       if (obj.date !== "" && obj.time !== "" && obj.flightNumber !== "" && obj.pick_up !== "" && obj.drop_off == "" && obj.name == "" && obj.contactNumber == "") {
-        obj.drop_off = ctx.message.text;
+        obj.drop_off = `${ctx.message.location.latitude},${ctx.message.location.longitude}`;
+        axios.get(`https://maps.googleapis.com/maps/api/directions/json?origin=${obj.pick_up}&destination=${obj.drop_off}&key=${process.env.GOOGLE_MAP_API_KEY}`)
+          .then((res) => {
+            obj.distance = res.data.routes[0].legs[0].distance.value;
+            obj.charge = Math.round(res.data.routes[0].legs[0].distance.value/1609.344*3);
+            console.log(obj)
+          })
+          .catch((err) => {
+            console.log(err)
+          })
         ctx.reply("ManNVan - please enter your name (e.g. Martin Barnes)");
         break;
       }
@@ -320,6 +359,7 @@ Please press Match to take this order, or Skip to tell us you are not interested
     if (obj.chatId == chatId && obj.service == "GoodsDelivery") { }
   }
 })
+
 
 bot.launch()
 
