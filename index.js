@@ -101,36 +101,34 @@ bot.command('callvan', (ctx) => {
     charge: "",
     numberofitems: "",
     helpers: "",
-    stairs: "",
     assembleservice: "",
     extrahour: "",
     flightNumber: "",
     name: "",
-    contactNumber: ""
+    contactNumber: "",
+    broadcastChatId: "",
+    broadcastMessageId: ""
   }
-
-  console.log(orderinfo)
   if (checkStorage(chatId)) {
-    ctx.reply(`
-ManNVan - you have already filed an order: 
+    ctx.reply(
+`ManNVan - you have already filed an order: 
 
 Username: ${checkStorage(chatId).username}
 Service: ${checkStorage(chatId).service}
 Order time: ${checkStorage(chatId).inputTime}
 
-/cancel it if you want to make a new order
-`)
+/cancel it if you want to make a new order`
+)
     console.log(checkStorage(chatId))
   } else {
     storage.push(orderinfo)
     ctx.reply("ManNVan - please select your service", 
     Markup
-    .keyboard([["Manchester Airport Transfer"], ["Home Moving"], ["Furniture Delivery and Assembly"], ["Goods Delivery"]])
+    .keyboard([["Manchester Airport Transfer"], ["Home Moving"], ["Furniture Delivery and Assembly"], ["Goods Delivery"]]).oneTime()
   )}
 })
 
 // bot.command('broadcast', (ctx) => {
-//   console.log(ctx.message)
 //   ctx.telegram.sendMessage(process.env.DRIVER_CHANNEL_ID, "ManNVan - please select your service", {
 //     "reply_markup": JSON.stringify({
 //       "inline_keyboard": [
@@ -142,19 +140,25 @@ Order time: ${checkStorage(chatId).inputTime}
 //     })
 //   })
 // })
-// "ManNVan - please identify your arrival date (e.g. 2022-04-22)")
+
+// /(.*?)/
 
 bot.action(/(.*?)/, (ctx) => {
-  const clientId = ctx.update.callback_query.data
+  const clientId = ctx.update.callback_query.data;
+  console.log(ctx)
+  console.log(ctx.update.callback_query)
   const checkResult = checkStorage(clientId)
+  const driverId = ctx.update.callback_query.from.id;
+  const driverUsername = ctx.update.callback_query.from.username
   //check if storage have this order
   if (checkResult) {
-    ctx.telegram.sendMessage(clientId, `
-ManNVan - your order has been accepted by @${ctx.update.callback_query.from.username}
-(ID: ${ctx.update.callback_query.from.id})
-`)
-    ctx.answerCbQuery('Matching request sent!')
-    ctx.reply("ManNVan - matching successful, please contact the client with the information below")
+    ctx.telegram.sendMessage(clientId, 
+`ManNVan - your order has been accepted by @${driverUsername}
+(ID: ${driverId})`
+)
+    ctx.answerCbQuery('Matching successful')
+    ctx.telegram.sendMessage(driverId, `ManNVan - You have matched an order! Please contact user ASAP! \n \n ================ \n ${ctx.update.callback_query.message.text} \n ================`)
+    ctx.telegram.editMessageText(ctx.update.callback_query.message.chat.id, ctx.update.callback_query.message.message_id, undefined, `${ctx.update.callback_query.message.text}\n \n **ORDER TAKEN BY @${driverUsername} (ID: ${ctx.update.callback_query.from.id})`, )
     //delete server storage copy
     for (var i = 0; i < storage.length; i++) {
       if (storage[i].chatId == clientId) {
@@ -165,8 +169,7 @@ ManNVan - your order has been accepted by @${ctx.update.callback_query.from.user
     //store driver info in database
   }
   else {
-    ctx.answerCbQuery('Matching request sent!')
-    ctx.reply("ManNVan - matching unsuccessful as this order may have been taken or cancelled")
+    ctx.answerCbQuery('Matching failed as this order may have been cancelled')
   }
 })
 
@@ -219,7 +222,7 @@ bot.on('message', (ctx) => {
 
       //put answer into obj.service => ask date
       if (obj.service == "" ) {
-        if ( ctx.message.text == "Manchester Airport Transfer" || "Home Moving" || "Furniture Delivery and Assembly" || "Goods Delivery") {
+        if ( ctx.message.text == "Manchester Airport Transfer" || ctx.message.text ==  "Home Moving" || ctx.message.text ==  "Furniture Delivery and Assembly" || ctx.message.text ==  "Goods Delivery") {
           obj.service = ctx.message.text;
           ctx.reply("ManNVan - please identify your booking date (e.g. 2022-04-22)");
           if(ctx.message.text == "Manchester Airport Transfer"){
@@ -275,10 +278,17 @@ bot.on('message', (ctx) => {
         if(ctx.message.location){
           obj.drop_off = `${ctx.message.location.latitude},${ctx.message.location.longitude}`;
           axios.get(`https://maps.googleapis.com/maps/api/directions/json?origin=${obj.pick_up}&destination=${obj.drop_off}&key=${process.env.GOOGLE_MAP_API_KEY}`)
-            .then((res) => {
-              obj.distance = res.data.routes[0].legs[0].distance.value;
-              obj.charge = Math.round(res.data.routes[0].legs[0].distance.value/1609.344*3);
-              obj.drop_off_address = res.data.routes[0].legs[0].end_address;
+            .then((res) => {              
+              if(obj.service == "Manchester Airport Transfer"){
+                obj.distance = res.data.routes[0].legs[0].distance.value;
+                obj.charge = Math.round(res.data.routes[0].legs[0].distance.value/1609.344*3);
+                obj.drop_off_address = res.data.routes[0].legs[0].end_address;
+              }else{
+                obj.distance = res.data.routes[0].legs[0].distance.value;
+                obj.charge = Math.round(res.data.routes[0].legs[0].distance.value/1609.344*3);
+                obj.drop_off_address = res.data.routes[0].legs[0].end_address;
+                obj.pick_up_address = res.data.routes[0].legs[0].start_address;
+              }
             })
             .catch((err) => {
               console.log(err)
@@ -294,7 +304,7 @@ bot.on('message', (ctx) => {
       if (obj.drop_off !== "" && obj.numberofitems == ""){
         if (ApplyRegex("numberofitems", ctx.message.text)){
           obj.numberofitems = ctx.message.text;
-          ctx.reply("ManNVan - please specifiy any additional helper needed (e.g. 1)",
+          ctx.reply("ManNVan - please specifiy any additional helper needed (i.e. £45 for 3 hours)",
           Markup.keyboard([["0", "1", "2", "3"]]).resize());
         }else{
           ctx.reply("ManNVan - please identify the amount in number (e.g. 1)")
@@ -306,8 +316,9 @@ bot.on('message', (ctx) => {
       if (obj.numberofitems !== "" && obj.helpers == ""){
         if (ApplyRegex("numberinclude0", ctx.message.text)){
           obj.helpers = ctx.message.text;
-          ctx.reply("ManNVan - please identify if you need any extra hour (e.g. 1)",
-          Markup.keyboard([["0", "1", "2", "3"]]).resize());
+          obj.charge = obj.charge + ctx.message.text*45
+          ctx.reply("ManNVan - please identify if you need any extra hour (e.g. £20 for 1 hour )",
+          Markup.keyboard([["0", "1", "2", "3"]]).resize().oneTime());
         }else{
           ctx.reply("ManNVan - please identify the extra helper you need in number (e.g. 1)")
         }
@@ -321,9 +332,10 @@ bot.on('message', (ctx) => {
       if (obj.helpers !== "" && obj.extrahour == ""){
         if (ApplyRegex("numberinclude0", ctx.message.text)){
           obj.extrahour = ctx.message.text;
+          obj.charge = obj.charge + ctx.message.text*20
           if(obj.service == "Furniture Delivery and Assembly" || obj.service == "Home Moving"){
-            ctx.reply("ManNVan - please state the number of funiture needed to be assemble (i.e. if no, press 0)",
-            Markup.keyboard([["0", "1", "2", "3"]]).resize())
+            ctx.reply("ManNVan - please state the number of funiture needed to be assemble (i.e. £50 each, if no press 0)",
+            Markup.keyboard([["0", "1", "2", "3"]]).resize().oneTime())
           }
           else if(obj.service == "Manchester Airport Transfer"){
             ctx.reply("ManNVan - please identify your flight number (e.g. BA175)")
@@ -338,9 +350,10 @@ bot.on('message', (ctx) => {
       }
 
       //put answer into obj.assembleservice => ask name
-      if (obj.service == "Furniture Delivery and Assembly" || obj.service == "Home Moving" && obj.extrahour !== "" && obj.assembleservice == ""){
+      if (obj.service == "Furniture Delivery and Assembly" && obj.extrahour !== "" && obj.assembleservice == "" || obj.service == "Home Moving" && obj.extrahour !== "" && obj.assembleservice == ""){
         if (ApplyRegex("numberinclude0", ctx.message.text)){
           obj.assembleservice = ctx.message.text;
+          obj.charge = obj.charge + ctx.message.text*50
           ctx.reply("ManNVan - please enter your name (e.g. Martin Barnes)")
         }else{
           ctx.reply("ManNVan - please enter your answer with numbers (i.e. if no, press 0)")
@@ -359,7 +372,7 @@ bot.on('message', (ctx) => {
       }
 
       //put answer into obj.name => ask contact
-      if (obj.service == "Furniture Delivery and Assembly" || obj.service == "Home Moving" && obj.assembleservice !== "" && obj.name == ""){
+      if (obj.service == "Furniture Delivery and Assembly" && obj.assembleservice !== "" && obj.name == ""|| obj.service == "Home Moving" && obj.assembleservice !== "" && obj.name == ""){
         if (ApplyRegex("name", ctx.message.text)) {
           obj.name = ctx.message.text;
           ctx.reply("ManNVan - please enter your contact number (e.g. 07882590546)");
@@ -390,26 +403,90 @@ bot.on('message', (ctx) => {
       }
 
       //put answer into obj.contactNumber => ask for broadcast permission
+      //calculate minimum charges
       if (obj.name !== "" && obj.contactNumber == "") {
         if (ApplyRegex("contactNumber", ctx.message.text)) {
         obj.contactNumber = ctx.message.text;
-        ctx.reply(`
-ManNVan - Order information overview: 
+          if(obj.charge < 100){
+            obj.charge = 100
+          }          
+          if(obj.service == "Furniture Delivery and Assembly" || obj.service == "Home Moving"){
+            ctx.reply(
+`ManNVan - Order information overview: 
 
 【${obj.service}】
- 
+
 Date: ${obj.date}
 Time: ${obj.time}
-Pick-up address: ${obj.pick_up_address}
-Drop-off address: ${obj.drop_off_address}
+Pick-up address: 
+${obj.pick_up_address}
+Drop-off address: 
+${obj.drop_off_address}
+
+Amount: ${obj.numberofitems} 
+Helpers: ${obj.helpers}
+Extra hours: ${obj.extrahour}
+Assemble service: ${obj.assembleservice}
 Estimate Charges: £${obj.charge}
 
 Name: ${obj.name}
 Contact Number: ${obj.contactNumber}
 Username: @${obj.username}
 
-Please press confirm to send your order, or press cancel to create your new order
+Please press Confirm to send your order, or Cancel to start a new one
 `, Markup.keyboard([["Confirm", "Cancel"]]).resize().oneTime())
+          }
+          else if(obj.service == "Manchester Airport Transfer"){
+            ctx.reply(
+`ManNVan - Order information overview: 
+
+【${obj.service}】
+  
+Date: ${obj.date}
+Time: ${obj.time}
+Flight number : ${obj.flightNumber}
+Pick-up address: 
+${obj.pick_up_address}
+Drop-off address: 
+${obj.drop_off_address}
+
+Amount: ${obj.numberofitems} 
+Helpers: ${obj.helpers}
+Extra hours: ${obj.extrahour}
+Estimate Charges: £${obj.charge}
+
+Name: ${obj.name}
+Contact Number: ${obj.contactNumber}
+Username: @${obj.username}
+
+Please press Confirm to send your order, or Cancel to start a new one
+`, Markup.keyboard([["Confirm", "Cancel"]]).resize().oneTime())
+          }
+          else if(obj.service == "Goods Delivery"){
+            ctx.reply(
+`ManNVan - Order information overview: 
+
+【${obj.service}】
+
+Date: ${obj.date}
+Time: ${obj.time}
+Pick-up address: 
+${obj.pick_up_address}
+Drop-off address: 
+${obj.drop_off_address}
+
+Amount: ${obj.numberofitems} 
+Helpers: ${obj.helpers}
+Extra hours: ${obj.extrahour}
+Estimate Charges: £${obj.charge}
+
+Name: ${obj.name}
+Contact Number: ${obj.contactNumber}
+Username: @${obj.username}
+
+Please press Confirm to send your order, or Cancel to start a new one
+`, Markup.keyboard([["Confirm", "Cancel"]]).resize().oneTime())               
+          }        
       }else{        
         ctx.reply("ManNVan - please follow the exact format entering your contact number");
       }
@@ -418,38 +495,134 @@ Please press confirm to send your order, or press cancel to create your new orde
 
       //watch answer from respond => broadcast to driver group
       if (obj.name !== "" && obj.contactNumber !== "") {
-        if (ctx.message.text == "Confirm") {
+          // already broadcast scenario
           if (obj.status == "sent2Driver") {
-            ctx.reply("ManNVan - your order has been sent to our professional drivers, please be patient for any response");
+            if (ctx.message.text == "Confirm") {
+                ctx.reply("ManNVan - your order has already sent to our professional drivers, please be patient for any response");
+            }
+            else if (ctx.message.text == "Cancel") {
+              for (var i = 0; i < storage.length; i++) {
+                if (storage[i].chatId == chatId) {
+                  storage.splice(i, 1);
+                }
+              }
+              ctx.telegram.deleteMessage(obj.broadcastChatId, obj.broadcastMessageId)
+              ctx.reply("ManNVan - your order has been cancelled");
+            }
+            break;
           }
-          //send order to driver channel (action: limited to 1 time)
-          if (obj.status == "drafting") {
-            ctx.telegram.sendMessage(process.env.DRIVER_CHANNEL_ID, `
-ManNVan - Order information overview: 
 
-【${obj.service} ${obj.date}】
+          // waiting confirmation to send order to driver channel (action: limited to 1 time)
+          else if (obj.status == "drafting") {
+            if (ctx.message.text == "Confirm") {
+              if(obj.service == "Furniture Delivery and Assembly" || obj.service == "Home Moving"){
+                ctx.telegram.sendMessage(process.env.DRIVER_CHANNEL_ID,
+`【${obj.service}】
 
 Date: ${obj.date}
 Time: ${obj.time}
-Flight Number: ${obj.flightNumber}
-Pick-up airport: ${obj.pick_up}
-Drop-off destination: ${obj.drop_off}
+Pick-up address: 
+${obj.pick_up_address}
+Drop-off address: 
+${obj.drop_off_address}
+
+Amount: ${obj.numberofitems} 
+Helpers: ${obj.helpers}
+Extra hours: ${obj.extrahour}
+Assemble service: ${obj.assembleservice}
+Estimate Charges: £${obj.charge}
 
 Name: ${obj.name}
 Contact Number: ${obj.contactNumber}
 Username: @${obj.username}
 
-Please press Match to take this order, or Skip to tell us you are not interested
-// `, Markup.inlineKeyboard([
-  Markup.button.callback('Match', `${obj.chatId}`),
-  Markup.button.callback('Report', `r${obj.chatId}`)
+Please press Match to take this order, or Report if you find it suspicious
+`, Markup.inlineKeyboard([
+Markup.button.callback('Match', `${obj.chatId}`),
+Markup.button.callback('Report', `r${obj.chatId}`)
 ]))
+//delete this order from bradcast after 1 mins
+.then((ctx) => {
+  obj.broadcastChatId = ctx.chat.id;
+  obj.broadcastMessageId = ctx.message_id;
+  setTimeout(() => {
+    bot.telegram.deleteMessage(ctx.chat.id, ctx.message_id)      
+  }, 1000*60*5);
+})
+            }
+            else if(obj.service == "Manchester Airport Transfer"){
+              ctx.telegram.sendMessage(process.env.DRIVER_CHANNEL_ID,
+`【${obj.service}】
+
+Date: ${obj.date}
+Time: ${obj.time}
+Flight number : ${obj.flightNumber}
+Pick-up address: 
+${obj.pick_up_address}
+Drop-off address: 
+${obj.drop_off_address}
+
+Amount: ${obj.numberofitems} 
+Helpers: ${obj.helpers}
+Extra hours: ${obj.extrahour}
+Estimate Charges: £${obj.charge}
+
+Name: ${obj.name}
+Contact Number: ${obj.contactNumber}
+Username: @${obj.username}
+
+Please press Match to take this order, or Report if you find it suspicious
+`, Markup.inlineKeyboard([
+Markup.button.callback('Match', `${obj.chatId}`),
+Markup.button.callback('Report', `r${obj.chatId}`)
+]))
+.then((ctx) => {
+  obj.broadcastChatId = ctx.chat.id;
+  obj.broadcastMessageId = ctx.message_id;
+  setTimeout(() => {
+    bot.telegram.deleteMessage(ctx.chat.id, ctx.message_id)      
+  }, 1000*60*30);
+
+})
+            } 
+            else if(obj.service == "Goods Delivery"){
+              ctx.telegram.sendMessage(process.env.DRIVER_CHANNEL_ID,
+`【${obj.service}】
+
+Date: ${obj.date}
+Time: ${obj.time}
+Pick-up address: 
+${obj.pick_up_address}
+Drop-off address: 
+${obj.drop_off_address}
+
+Amount: ${obj.numberofitems} 
+Helpers: ${obj.helpers}
+Extra hours: ${obj.extrahour}
+Estimate Charges: £${obj.charge}
+
+Name: ${obj.name}
+Contact Number: ${obj.contactNumber}
+Username: @${obj.username}
+
+Please press Match to take this order, or Report if you find it suspicious
+`,Markup.inlineKeyboard([
+Markup.button.callback('Match', `${obj.chatId}`),
+Markup.button.callback('Report', `r${obj.chatId}`)
+]))
+.then((ctx) => {
+  obj.broadcastChatId = ctx.chat.id;
+  obj.broadcastMessageId = ctx.message_id;
+  setTimeout(() => {
+    bot.telegram.deleteMessage(ctx.chat.id, ctx.message_id)      
+  }, 1000*60*30);
+})
+            }
             obj.status = "sent2Driver"
-            ctx.reply("ManNVan - we are matching your order with our professional drivers, this usually takes 10-15 mins");
-            //Requirement: send order record to database
-          }
+            ctx.reply(`ManNVan - we are matching your order with our professional drivers, this usually takes 10-15 mins. If you want to cancel it, type "Cancel"`);
+          }  
         }
-        if (ctx.message.text == "Cancel") {
+        else if (ctx.message.text == "Cancel") {
           for (var i = 0; i < storage.length; i++) {
             if (storage[i].chatId == chatId) {
               storage.splice(i, 1);
