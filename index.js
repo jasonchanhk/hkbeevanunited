@@ -30,13 +30,14 @@ bot.use(session)
 const ApplyRegex = (item, text) => {
   //library for imput regex
   const pattern = {
-    order_date: /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$/,
+    order_date: /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[0y1])$/,
     order_time: /^(0[0-9]|1[0-9]|2[0-3])([012345][0-9])$/,
     flightNumber: /^[a-zA-Z]{2,3}\d{2,4}$/gm,
     name: /^[a-zA-Z\s]*$/gm,
     contact: /(((\+44)? ?(\(0\))? ?)|(0))( ?[0-9]{3,4}){3}/gm,
     items: /^[1-9]\d*$/gm,
-    numberinclude0: /^[0-9]\d*$/gm
+    numberinclude0: /^[0-9]\d*$/gm,
+    postcode: /([Gg][Ii][Rr] 0[Aa]{2})|((([A-Za-z][0-9]{1,2})|(([A-Za-z][A-Ha-hJ-Yj-y][0-9]{1,2})|(([A-Za-z][0-9][A-Za-z])|([A-Za-z][A-Ha-hJ-Yj-y][0-9][A-Za-z]?))))\s?[0-9][A-Za-z]{2})/gm
   };
   //return true/false to see if it match
   const targerPattern = pattern[item]
@@ -50,7 +51,9 @@ bot.start((ctx) => {
   ctx.reply(`
 Welcome onboard, @${username}!
 
-Thank you for chosing ManNVan. Our team of professional drivers are dedicated to provide flexible and qaulity service on your demand. Send us a message to know how we can help you!
+Thank you for chosing HKBeeVanUtd. Our team of professional drivers are dedicated to provide the most flexible and high quality service on your demand. 
+
+The most common package we offer is the standard 1-hour door to door service with our medium van(L: 2.4m/ W: 1.7m/ H: 1.5m). Send us a message to know how we can help!
 
 /callvan Send order to our team
 /status Check order status
@@ -75,9 +78,9 @@ bot.command('callvan', (ctx) => {
     order_date: null,
     order_time: null,
     pick_up_address: null,
-    pick_up_geo: null,
+    pick_up_postcode: null,
     drop_off_address: null,
-    drop_off_geo: null,
+    drop_off_postcode: null,
     distance: null,
     charges: null,
     items: null,
@@ -86,11 +89,12 @@ bot.command('callvan', (ctx) => {
     extra_hours: null,
     flightNumber: null,
     name: null,
-    contact: null
+    contact: null,
+    preferred_contact: null
   }
   if (Object.keys(ctx.session).length !== 0) {
     ctx.reply(
-`ManNVan - you have already filed an order: 
+      `HKBeeVanUtd - you have already filed an order: 
 
 Username: ${ctx.session.username}
 Service: ${ctx.session.service}
@@ -100,14 +104,12 @@ OrderID: ${ctx.session.order_id}
     )
   } else {
     ctx.session = orderinfo
-    ctx.reply("ManNVan - please select your service",
+    ctx.reply("HKBeeVanUtd - please select your service",
       Markup
         .keyboard([["Manchester Airport Transfer"], ["Home Moving"], ["Furniture Delivery and Assembly"], ["Goods Delivery"]]).oneTime()
     )
   }
 })
-
-// /(.*?)/
 
 bot.action(/(.*?)/, (ctx) => {
 
@@ -115,73 +117,99 @@ bot.action(/(.*?)/, (ctx) => {
   const driver_chat_id = ctx.update.callback_query.from.id;
   const driver_username = ctx.update.callback_query.from.username
 
-  pool.query("SELECT * FROM orders WHERE order_id = ?", [order_id], (err, results) => {
-    const db_res = results[0]
-    //order availability => status => driver_chat_id
+  if (order_id.startsWith('!')) {
+    const new_order_id = order_id.substring(1)
+    pool.query("SELECT * FROM orders WHERE order_id = ?", [new_order_id], (err, results) => {
+      const db_res = results[0]
+      //order availability => status => driver_chat_id
 
-    if(db_res.status == "taken") {
-      return ctx.answerCbQuery('Matching failed - order taken')
-    }
-    else if (db_res.status == "sent2Driver") {
-      pool.query("UPDATE orders SET driver_chat_id = ?, status = 'taken' WHERE order_id = ?", [driver_chat_id, order_id], (err, results) => {
-        if (err) throw err;
-      })
-      ctx.telegram.sendMessage(db_res.user_chat_id, 
-`ManNVan - your order has been accepted by @${driver_username}
-(ID: ${driver_chat_id})`
+      if (db_res.status == "taken") {
+        return ctx.answerCbQuery('Reporting failed - order taken')
+      }
+      else if (db_res.status == "sent2Driver") {
+        pool.query("UPDATE orders SET driver_chat_id = ?, status = 'report' WHERE order_id = ?", [driver_chat_id, new_order_id], (err, results) => {
+          if (err) throw err;
+        })
+        ctx.telegram.sendMessage(db_res.user_chat_id,
+          `HKBeeVanUtd - your order has been rejected by our driver, please contact our customer support at 07882590546`
         )
-      ctx.answerCbQuery('Matching successful')
-      ctx.telegram.sendMessage(driver_chat_id, `ManNVan - You have matched an order! Please contact user ASAP! \n \n ================ \n ${ctx.update.callback_query.message.text} \n ================`)
-      ctx.telegram.editMessageText(ctx.update.callback_query.message.chat.id, ctx.update.callback_query.message.message_id, undefined, `${ctx.update.callback_query.message.text}\n \n **ORDER TAKEN BY @${driver_username} (ID: ${ctx.update.callback_query.from.id})**`, )
-    } 
-    if (err) throw err;
-  })
+        ctx.answerCbQuery('Order reported')
+        ctx.telegram.editMessageText(ctx.update.callback_query.message.chat.id, ctx.update.callback_query.message.message_id, undefined, `${ctx.update.callback_query.message.text}\n \n **⚠ORDER REPORTED BY @${driver_username} (ID: ${ctx.update.callback_query.from.id})**`,)
+      }
+      if (err) throw err;
+    })
+  }
+  else {
+    pool.query("SELECT * FROM orders WHERE order_id = ?", [order_id], (err, results) => {
+      const db_res = results[0]
+      //order availability => status => driver_chat_id
+
+      if (db_res.status == "taken") {
+        return ctx.answerCbQuery('Matching failed - order taken')
+      }
+      if (db_res.status == "report") {
+        return ctx.answerCbQuery('Matching failed - order reported')
+      }
+      else if (db_res.status == "sent2Driver") {
+        pool.query("UPDATE orders SET driver_chat_id = ?, status = 'taken' WHERE order_id = ?", [driver_chat_id, order_id], (err, results) => {
+          if (err) throw err;
+        })
+        ctx.telegram.sendMessage(db_res.user_chat_id,
+          `HKBeeVanUtd - your order has been accepted by @${driver_username}
+  (ID: ${driver_chat_id})`
+        )
+        ctx.answerCbQuery('Matching successful')
+        ctx.telegram.sendMessage(driver_chat_id, `HKBeeVanUtd - You have matched an order! Please contact user ASAP! \n \n ================ \n ${ctx.update.callback_query.message.text} \n ================`)
+        ctx.telegram.editMessageText(ctx.update.callback_query.message.chat.id, ctx.update.callback_query.message.message_id, undefined, `${ctx.update.callback_query.message.text}\n \n **✅ORDER TAKEN BY @${driver_username} (ID: ${ctx.update.callback_query.from.id})**`,)
+      }
+      if (err) throw err;
+    })
+  }
 })
 
 bot.command('cancel', (ctx) => {
   //session not empty
   if (Object.keys(ctx.session).length !== 0) {
     //complete form input
-    if (ctx.session.name !== null && ctx.session.contact !== null) {
+    if (ctx.session.contact !== null && ctx.session.preferred_contact !== null) {
       //not sent out yet
       if (ctx.session.status == 'drafting') {
         ctx.session = null
-        ctx.reply("ManNVan - your order is cancelled")
-      } 
+        ctx.reply("HKBeeVanUtd - your order is cancelled")
+      }
       //already sent out
       else if (ctx.session.status == 'sent2Driver') {
         pool.query("SELECT * FROM orders WHERE order_id = ?", [ctx.session.order_id], (err, results) => {
           const db_res = results[0]
           if (db_res.status == "taken") {
-            ctx.reply("ManNVan - your can't cancel this order as it is matched");
+            ctx.reply("HKBeeVanUtd - your can't cancel the last order as it is matched, however you can now make a new order");
           }
-          else if (db_res.status == "sent2Driver") {      
+          else if (db_res.status == "cancel" || db_res.status == "report") {
+            ctx.reply("HKBeeVanUtd - your order is cancelled")
+          }
+          else if (db_res.status == "sent2Driver") {
             pool.query("UPDATE orders SET status = 'cancel' WHERE order_id = ?", [ctx.session.order_id], (err, results) => {
               if (results) {
-                ctx.telegram.deleteMessage(ctx.session.broadcastChatId, ctx.session.broadcastMessageId)
-                ctx.reply("ManNVan - your order is cancelled")   
+                ctx.telegram.deleteMessage(`${process.env.DRIVER_CHANNEL_ID}`, ctx.session.broadcastMessageId)
+                ctx.reply("HKBeeVanUtd - your order is cancelled")
               }
               if (err) throw err
             })
           }
-          else if (db_res.status == "cancel") {
-            return  ctx.reply("ManNVan - your order is cancelled")  
-            
-          }
-          if (err) throw err;
+          if (err) throw err;    
         })
         ctx.session = null;
       }
     }
     //incomplete form input
-    else{
+    else {
       ctx.session = null
-      ctx.reply("ManNVan - your order has been cancelled");
+      ctx.reply("HKBeeVanUtd - your order has been cancelled");
     }
-  } 
+  }
   //session empty
   else {
-    ctx.reply("ManNVan - your don't have any order yet")
+    ctx.reply("HKBeeVanUtd - your don't have any order yet")
   }
 })
 
@@ -189,13 +217,13 @@ bot.command('confirm', (ctx) => {
   //session not empty
   if (Object.keys(ctx.session).length !== 0) {
     //complete form input
-    if (ctx.session.name !== null && ctx.session.contact !== null) {
+    if (ctx.session.contact !== null && ctx.session.preferred_contact !== null) {
       //not sent out yet
       if (ctx.session.status == 'drafting') {
         //update status
         ctx.session.status = "sent2Driver"
         ctx.reply(
-`ManNVan - we are matching your order with our professional drivers, this usually takes 10-15 mins.
+          `HKBeeVanUtd - we are matching your order with our professional drivers, this usually takes 10-15 mins.
 
 If you didn't receive any response in 1 hour, please send us another request.`);
         //save order into db
@@ -207,6 +235,8 @@ If you didn't receive any response in 1 hour, please send us another request.`);
         if (ctx.session.service == "Furniture Delivery and Assembly" || ctx.session.service == "Home Moving") {
           return ctx.telegram.sendMessage(process.env.DRIVER_CHANNEL_ID,
             `【${ctx.session.service}】
+
+OID: ${ctx.session.order_id}
 
 Date: ${ctx.session.order_date}
 Time: ${ctx.session.order_time}
@@ -224,24 +254,27 @@ Estimate Charges: £${ctx.session.charges}
 Name: ${ctx.session.name}
 Contact Number: ${ctx.session.contact}
 Username: @${ctx.session.username}
+Preferred contact: ${ctx.session.preferred_contact}
 
 Please press Match to take this order, or Report if you find it suspicious
 `, Markup.inlineKeyboard([
               Markup.button.callback('Match', `${ctx.session.order_id}`),
-              Markup.button.callback('Report', `r${ctx.session.order_id}`)
+              Markup.button.callback('Report', `!${ctx.session.order_id}`)
             ]))
-            .then((ctx2) => {
-              ctx.session.broadcastChatId = ctx2.chat.id;
-              ctx.session.broadcastMessageId = ctx2.message_id;
-              setTimeout(() => {
-                bot.telegram.deleteMessage(ctx2.chat.id, ctx2.message_id)
-                console.log('deleted in 1 hour')
-              }, 1000 * 60 * 60);
-            })
+          .then((ctx2) => {
+            ctx.session.broadcastChatId = `${ctx2.chat.id}`;
+            ctx.session.broadcastMessageId = ctx2.message_id;
+            // setTimeout(() => {
+            //   bot.telegram.deleteMessage(`${ctx2.chat.id}`, ctx2.message_id)
+            //   console.log('deleted in 1 hour')
+            // }, 1000 * 60 * 60);
+          })
         }
         else if (ctx.session.service == "Manchester Airport Transfer") {
           return ctx.telegram.sendMessage(process.env.DRIVER_CHANNEL_ID,
             `【${ctx.session.service}】
+
+OID: ${ctx.session.order_id}
 
 Date: ${ctx.session.order_date}
 Time: ${ctx.session.order_time}
@@ -259,24 +292,27 @@ Estimate Charges: £${ctx.session.charges}
 Name: ${ctx.session.name}
 Contact Number: ${ctx.session.contact}
 Username: @${ctx.session.username}
+Preferred contact: ${ctx.session.preferred_contact}
 
 Please press Match to take this order, or Report if you find it suspicious
 `, Markup.inlineKeyboard([
               Markup.button.callback('Match', `${ctx.session.order_id}`),
-              Markup.button.callback('Report', `r${ctx.session.order_id}`)
+              Markup.button.callback('Report', `!${ctx.session.order_id}`)
             ]))
-            .then((ctx2) => {
-              ctx.session.broadcastChatId = ctx2.chat.id;
-              ctx.session.broadcastMessageId = ctx2.message_id;
-              setTimeout(() => {
-                bot.telegram.deleteMessage(ctx2.chat.id, ctx2.message_id)
-                console.log('deleted in 1 hour')
-              }, 1000 * 60 * 60);
-            })
+          .then((ctx2) => {
+            ctx.session.broadcastChatId = `${ctx2.chat.id}`;
+            ctx.session.broadcastMessageId = ctx2.message_id;
+            // setTimeout(() => {
+            //   bot.telegram.deleteMessage(`${ctx2.chat.id}`, ctx2.message_id)
+            //   console.log('deleted in 1 hour')
+            // }, 1000 * 60 * 60);
+          })
         }
         else if (ctx.session.service == "Goods Delivery") {
           return ctx.telegram.sendMessage(process.env.DRIVER_CHANNEL_ID,
             `【${ctx.session.service}】
+
+OID: ${ctx.session.order_id}
 
 Date: ${ctx.session.order_date}
 Time: ${ctx.session.order_time}
@@ -293,30 +329,31 @@ Estimate Charges: £${ctx.session.charges}
 Name: ${ctx.session.name}
 Contact Number: ${ctx.session.contact}
 Username: @${ctx.session.username}
+Preferred contact: ${ctx.session.preferred_contact}
 
 Please press Match to take this order, or Report if you find it suspicious
 `, Markup.inlineKeyboard([
               Markup.button.callback('Match', `${ctx.session.order_id}`),
-              Markup.button.callback('Report', `${ctx.session.order_id}`)
+              Markup.button.callback('Report', `!${ctx.session.order_id}`)
             ]))
-            .then((ctx2) => {
-              ctx.session.broadcastChatId = ctx2.chat.id;
-              ctx.session.broadcastMessageId = ctx2.message_id;
-              setTimeout(() => {
-                bot.telegram.deleteMessage(ctx2.chat.id, ctx2.message_id)
-                console.log('deleted in 1 hour')
-              }, 1000 * 60 * 60);
-            })
+          .then((ctx2) => {
+            ctx.session.broadcastChatId = `${ctx2.chat.id}`;
+            ctx.session.broadcastMessageId = ctx2.message_id;
+            // setTimeout(() => {
+            //   bot.telegram.deleteMessage(`${ctx2.chat.id}`, ctx2.message_id)
+            //   console.log('deleted in 1 hour')
+            // }, 1000 * 60 * 60);
+          })
         }
-      } 
+      }
       //already sent out
       else if (ctx.session.status == 'sent2Driver') {
-        return ctx.reply("ManNVan - your order has already sent to our professional drivers, please be patient for any response");
+        return ctx.reply("HKBeeVanUtd - your order has already sent to our professional drivers, please be patient for any response");
       }
     }
     //incomplete form input
-    else{
-      ctx.reply("ManNVan - please complete the order first");
+    else {
+      ctx.reply("HKBeeVanUtd - please complete the order first");
     }
   }
 })
@@ -324,7 +361,7 @@ Please press Match to take this order, or Report if you find it suspicious
 bot.command('status', (ctx) => {
   if (Object.keys(ctx.session).length !== 0) {
     ctx.reply(`
-ManNVan - you have already filed an order: 
+HKBeeVanUtd - you have already filed an order: 
 
 Username: ${ctx.session.username}
 Service: ${ctx.session.service}
@@ -332,7 +369,7 @@ OrderID: ${ctx.session.order_id}
 
 /cancel it if you want to make a new order`)
   } else {
-    ctx.reply("ManNVan - your don't have any order yet")
+    ctx.reply("HKBeeVanUtd - your don't have any order yet")
   }
   console.log('session', ctx.session)
 })
@@ -344,14 +381,14 @@ bot.on('message', (ctx) => {
     if (ctx.session.service == null) {
       if (ctx.message.text == "Manchester Airport Transfer" || ctx.message.text == "Home Moving" || ctx.message.text == "Furniture Delivery and Assembly" || ctx.message.text == "Goods Delivery") {
         ctx.session.service = ctx.message.text;
-        ctx.reply("ManNVan - please identify your booking date (e.g. 2022-04-22)");
+        ctx.reply("HKBeeVanUtd - please identify your booking date (e.g. 2022-04-22)");
         if (ctx.message.text == "Manchester Airport Transfer") {
           ctx.session.pick_up_address = "Manchester Airport, Manchester M90 1QX, UK";
-          ctx.session.pick_up_geo = "53.3618129,-2.2706634"
+          ctx.session.pick_up_postcode = "M90 1QX"
         }
         return;
       } else {
-        ctx.reply("ManNVan - please selected the choices as stated");
+        ctx.reply("HKBeeVanUtd - please selected the choices as stated");
         console.log(ctx.message.text);
         return;
       }
@@ -361,10 +398,10 @@ bot.on('message', (ctx) => {
     if (ctx.session.service !== null && ctx.session.order_date == null) {
       if (ApplyRegex("order_date", ctx.message.text)) {
         ctx.session.order_date = ctx.message.text;
-        ctx.reply("ManNVan - please identify your booking time (e.g. 0930)");
+        ctx.reply("HKBeeVanUtd - please identify your booking time (e.g. 0930)");
         return;
       } else {
-        ctx.reply("ManNVan - please follow the exact format entering your booking date");
+        ctx.reply("HKBeeVanUtd - please follow the exact format entering your booking date");
         return;
       }
     }
@@ -372,69 +409,69 @@ bot.on('message', (ctx) => {
     //put answer into ctx.session.time => ask pick-up address
     if (ctx.session.order_date !== null && ctx.session.order_time == null) {
       if (ApplyRegex("order_time", ctx.message.text)) {
-        ctx.session.order_time = ctx.message.text.slice(0,2) + ':' + ctx.message.text.slice(2) + ':00';
+        ctx.session.order_time = ctx.message.text.slice(0, 2) + ':' + ctx.message.text.slice(2) + ':00';
         if (ctx.session.service == "Manchester Airport Transfer") {
-          ctx.reply("ManNVan - please enter your drop-off address (press 📎, select location, search postcode at top right 🔍)");
+          ctx.reply("HKBeeVanUtd - please enter your drop-off address postcode (e.g. M60 7RA)");
           return;
         } else {
-          ctx.reply("ManNVan - please enter your pick-up address (press 📎, select location, search postcode at top right 🔍)");
+          ctx.reply("HKBeeVanUtd - please enter your pick-up address postcode (e.g. M60 7RA)");
           return;
         }
       } else {
-        ctx.reply("ManNVan - please follow the exact format entering your booking time");
+        ctx.reply("HKBeeVanUtd - please follow the exact format entering your booking time");
         return;
       }
     }
 
     //put answer into ctx.session.pick_up => ask drop-off address
-    if (ctx.session.order_time !== null && ctx.session.pick_up_geo == null) {
-      if (ctx.message.location) {
-        ctx.session.pick_up_geo = `${ctx.message.location.latitude},${ctx.message.location.longitude}`;
-        ctx.reply("ManNVan - please enter your drop-off address (press 📎, select location, search postcode at top right 🔍)");
+    if (ctx.session.order_time !== null && ctx.session.pick_up_postcode == null) {
+      if (ApplyRegex("postcode", ctx.message.text)) {
+        ctx.session.pick_up_postcode = ctx.message.text;
+        ctx.reply("HKBeeVanUtd - please enter your drop-off address postcode (e.g. M60 7RA)");
         return;
       } else {
-        ctx.reply("ManNVan - please press 📎 below, select location, search your address with postcode at the top right 🔍")
+        ctx.reply("HKBeeVanUtd - please follow the exact format entering your pick-up address postcode")
         return;
       }
     }
 
     //put answer into ctx.session.drop_off => ask number of items
-    if (ctx.session.pick_up_geo !== null && ctx.session.drop_off_geo == null) {
-      if (ctx.message.location) {
-        ctx.session.drop_off_geo = `${ctx.message.location.latitude},${ctx.message.location.longitude}`;
-        return axios.get(`https://maps.googleapis.com/maps/api/directions/json?origin=${ctx.session.pick_up_geo}&destination=${ctx.session.drop_off_geo}&key=${process.env.GOOGLE_MAP_API_KEY}`)
+    if (ctx.session.pick_up_postcode !== null && ctx.session.drop_off_postcode == null) {
+      if (ApplyRegex("postcode", ctx.message.text)) {
+        ctx.session.drop_off_postcode = ctx.message.text;
+        return axios.get(`https://maps.googleapis.com/maps/api/directions/json?origin=${ctx.session.pick_up_postcode}&destination=${ctx.session.drop_off_postcode}&key=${process.env.GOOGLE_MAP_API_KEY}`)
           .then((res) => {
             if (ctx.session.service == "Manchester Airport Transfer") {
               ctx.session.distance = res.data.routes[0].legs[0].distance.value;
               ctx.session.charges = Math.round(res.data.routes[0].legs[0].distance.value / 1609.344 * 3);
               ctx.session.drop_off_address = res.data.routes[0].legs[0].end_address;
-              ctx.reply("ManNVan - please specify how many items you like to relocate(e.g. 5)");
+              ctx.reply("HKBeeVanUtd - please specify how many items you like to relocate(e.g. 5)");
             } else {
               ctx.session.distance = res.data.routes[0].legs[0].distance.value;
               ctx.session.charges = Math.round(res.data.routes[0].legs[0].distance.value / 1609.344 * 3);
               ctx.session.drop_off_address = res.data.routes[0].legs[0].end_address;
               ctx.session.pick_up_address = res.data.routes[0].legs[0].start_address;
-              ctx.reply("ManNVan - please specify how many items you like to relocate(e.g. 5)");
+              ctx.reply("HKBeeVanUtd - please specify how many items you like to relocate(e.g. 5)");
             }
           })
         //   .catch((err) => {
         //     console.log(err)
         //   })
       } else {
-        ctx.reply("ManNVan - please press 📎 below, select location, search your address with postcode at the top right 🔍")
+        ctx.reply("HKBeeVanUtd - please follow the exact format entering your drop-off address postcode")
         return;
       }
     }
 
     //put answer into obj.items => ask extra helper needed
-    if (ctx.session.drop_off_geo !== null && ctx.session.drop_off_address !== null && ctx.session.items == null) {
+    if (ctx.session.drop_off_postcode !== null && ctx.session.drop_off_address !== null && ctx.session.items == null) {
       if (ApplyRegex("items", ctx.message.text)) {
         ctx.session.items = ctx.message.text;
-        ctx.reply("ManNVan - please specifiy any additional helper needed (i.e. £45 for 3 hours)",
+        ctx.reply("HKBeeVanUtd - please specifiy how many additional helpers needed (i.e. £45 for 3 hours)",
           Markup.keyboard([["0", "1", "2", "3"]]).resize());
         return;
       } else {
-        ctx.reply("ManNVan - please identify the amount in number (e.g. 1)")
+        ctx.reply("HKBeeVanUtd - please identify the amount in number (e.g. 1)")
         return;
       }
     }
@@ -444,11 +481,11 @@ bot.on('message', (ctx) => {
       if (ApplyRegex("numberinclude0", ctx.message.text)) {
         ctx.session.helpers = ctx.message.text;
         ctx.session.charges = ctx.session.charges + ctx.message.text * 45
-        ctx.reply("ManNVan - please identify if you need any extra hour (e.g. £20 for 1 hour )",
+        ctx.reply("HKBeeVanUtd - please identify if you need any additional hours (e.g. £20 for 1 hour )",
           Markup.keyboard([["0", "1", "2", "3"]]).resize().oneTime());
         return;
       } else {
-        ctx.reply("ManNVan - please identify the extra helper you need in number (e.g. 1)");
+        ctx.reply("HKBeeVanUtd - please identify the extra helper you need in number (e.g. 1)");
         return;
       }
     }
@@ -462,20 +499,20 @@ bot.on('message', (ctx) => {
         ctx.session.extra_hours = ctx.message.text;
         ctx.session.charges = ctx.session.charges + ctx.message.text * 20
         if (ctx.session.service == "Furniture Delivery and Assembly" || ctx.session.service == "Home Moving") {
-          ctx.reply("ManNVan - please state the number of funiture needed to be assemble (i.e. £50 each, if no press 0)",
+          ctx.reply("HKBeeVanUtd - please state the number of funiture needed to be assemble (i.e. £50 each, if no press 0)",
             Markup.keyboard([["0", "1", "2", "3"]]).resize().oneTime());
           return;
         }
         else if (ctx.session.service == "Manchester Airport Transfer") {
-          ctx.reply("ManNVan - please identify your flight number (e.g. BA175)");
+          ctx.reply("HKBeeVanUtd - please identify your flight number (e.g. BA175)");
           return;
         }
         else if (ctx.session.service == "Goods Delivery") {
-          ctx.reply("ManNVan - please enter your name (e.g. Martin Barnes)");
+          ctx.reply("HKBeeVanUtd - please enter your name (e.g. Martin Barnes)");
           return;
         }
       } else {
-        ctx.reply("ManNVan - please identify the extra hour you need in number (e.g. 6)")
+        ctx.reply("HKBeeVanUtd - please identify the extra hour you need in number (e.g. 6)")
         return;
       }
     }
@@ -485,21 +522,22 @@ bot.on('message', (ctx) => {
       if (ApplyRegex("numberinclude0", ctx.message.text)) {
         ctx.session.assemble_services = ctx.message.text;
         ctx.session.charges = ctx.session.charges + ctx.message.text * 50
-        ctx.reply("ManNVan - please enter your name (e.g. Martin Barnes)");
+        ctx.reply("HKBeeVanUtd - please enter your name (e.g. Martin Barnes)");
         return;
       } else {
-        ctx.reply("ManNVan - please enter your answer with numbers (i.e. if no, press 0)");
+        ctx.reply("HKBeeVanUtd - please enter your answer with numbers (i.e. if no, press 0)");
         return;
       }
     }
+
     //put answer into ctx.session.flightNumber => ask name
     if (ctx.session.service == "Manchester Airport Transfer" && ctx.session.extra_hours !== null && ctx.session.flightNumber == null) {
       if (ApplyRegex("flightNumber", ctx.message.text)) {
         ctx.session.flightNumber = ctx.message.text;
-        ctx.reply("ManNVan - please enter your name (e.g. Martin Barnes)");
+        ctx.reply("HKBeeVanUtd - please enter your name (e.g. Martin Barnes)");
         return;
       } else {
-        ctx.reply("ManNVan - please follow the exact format entering your flight number");
+        ctx.reply("HKBeeVanUtd - please follow the exact format entering your flight number");
         return;
       }
     }
@@ -508,10 +546,10 @@ bot.on('message', (ctx) => {
     if (ctx.session.service == "Furniture Delivery and Assembly" && ctx.session.assemble_services !== null && ctx.session.name == null || ctx.session.service == "Home Moving" && ctx.session.assemble_services !== null && ctx.session.name == null) {
       if (ApplyRegex("name", ctx.message.text)) {
         ctx.session.name = ctx.message.text;
-        ctx.reply("ManNVan - please enter your contact number (e.g. 07882590546)");
+        ctx.reply("HKBeeVanUtd - please enter your contact number (e.g. 07882590546)");
         return;
       } else {
-        ctx.reply("ManNVan - your name should not include number or symbol");
+        ctx.reply("HKBeeVanUtd - your name should not include number or symbol");
         return;
       }
     }
@@ -519,10 +557,10 @@ bot.on('message', (ctx) => {
     if (ctx.session.service == "Manchester Airport Transfer" && ctx.session.flightNumber !== null && ctx.session.name == null) {
       if (ApplyRegex("name", ctx.message.text)) {
         ctx.session.name = ctx.message.text;
-        ctx.reply("ManNVan - please enter your contact number (e.g. 07882590546)");
+        ctx.reply("HKBeeVanUtd - please enter your contact number (e.g. 07882590546)");
         return;
       } else {
-        ctx.reply("ManNVan - your name should not include number or symbol");
+        ctx.reply("HKBeeVanUtd - your name should not include number or symbol");
         return;
       }
     }
@@ -530,27 +568,40 @@ bot.on('message', (ctx) => {
     if (ctx.session.service == "Goods Delivery" && ctx.session.extra_hours !== null && ctx.session.name == null) {
       if (ApplyRegex("name", ctx.message.text)) {
         ctx.session.name = ctx.message.text;
-        ctx.reply("ManNVan - please enter your contact number (e.g. 07882590546)");
+        ctx.reply("HKBeeVanUtd - please enter your contact number (e.g. 07882590546)");
         return;
       } else {
-        ctx.reply("ManNVan - your name should not include number or symbol");
+        ctx.reply("HKBeeVanUtd - your name should not include number or symbol");
         return;
       }
     }
 
-    //put answer into ctx.session.contactNumber => ask for broadcast permission
-    //calculate minimum charges
     if (ctx.session.name !== null && ctx.session.contact == null) {
       if (ApplyRegex("contact", ctx.message.text)) {
         ctx.session.contact = ctx.message.text;
+        ctx.reply("HKBeeVanUtd - please identify your preferred contact method",
+          Markup.keyboard([["Whatsapp", "Signal", "Telegram"]]).resize());
+        return;
+      } else {
+        ctx.reply("HKBeeVanUtd - please follow the exact format entering your contact number");
+        return;
+      }
+    }
+    //put answer into ctx.session.contactNumber => ask for broadcast permission
+    //calculate minimum charges
+    if (ctx.session.contact !== null && ctx.session.preferred_contact == null) {
+      if (ctx.message.text == 'Signal' || ctx.message.text == 'Whatsapp' || ctx.message.text == 'Telegram') {
+        ctx.session.preferred_contact = ctx.message.text;
         if (ctx.session.charges < 100) {
           ctx.session.charges = 100
         }
         if (ctx.session.service == "Furniture Delivery and Assembly" || ctx.session.service == "Home Moving") {
           return ctx.reply(
-            `ManNVan - Order information overview: 
+            `HKBeeVanUtd - Order information overview: 
 
 【${ctx.session.service}】
+
+OID: ${ctx.session.order_id}
 
 Date: ${ctx.session.order_date}
 Time: ${ctx.session.order_time}
@@ -568,15 +619,18 @@ Estimate Charges: £${ctx.session.charges}
 Name: ${ctx.session.name}
 Contact Number: ${ctx.session.contact}
 Username: @${ctx.session.username}
+Preferred contact: ${ctx.session.preferred_contact}
 
 Please press /confirm to send your order, or /cancel to start a new one
 `, Markup.keyboard([["/confirm", "/cancel"]]).resize().oneTime())
         }
         else if (ctx.session.service == "Manchester Airport Transfer") {
           return ctx.reply(
-            `ManNVan - Order information overview: 
+            `HKBeeVanUtd - Order information overview: 
 
 【${ctx.session.service}】
+
+OID: ${ctx.session.order_id}
   
 Date: ${ctx.session.order_date}
 Time: ${ctx.session.order_time}
@@ -594,15 +648,18 @@ Estimate Charges: £${ctx.session.charges}
 Name: ${ctx.session.name}
 Contact Number: ${ctx.session.contact}
 Username: @${ctx.session.username}
+Preferred contact: ${ctx.session.preferred_contact}
 
 Please press /confirm to send your order, or /cancel to start a new one
 `, Markup.keyboard([["/confirm", "/cancel"]]).resize().oneTime())
         }
         else if (ctx.session.service == "Goods Delivery") {
           return ctx.reply(
-            `ManNVan - Order information overview: 
+            `HKBeeVanUtd - Order information overview: 
 
 【${ctx.session.service}】
+
+OID: ${ctx.session.order_id}
 
 Date: ${ctx.session.order_date}
 Time: ${ctx.session.order_time}
@@ -619,12 +676,13 @@ Estimate Charges: £${ctx.session.charges}
 Name: ${ctx.session.name}
 Contact Number: ${ctx.session.contact}
 Username: @${ctx.session.username}
+Preferred contact: ${ctx.session.preferred_contact}
 
 Please press /confirm to send your order, or /cancel to start a new one
 `, Markup.keyboard([["/confirm", "/cancel"]]).resize().oneTime())
         }
       } else {
-        return ctx.reply("ManNVan - please follow the exact format entering your contact number");
+        return ctx.reply("HKBeeVanUtd - please select Preferred contact from Whatsapp, Telegram or Signal");
       }
     }
   }
